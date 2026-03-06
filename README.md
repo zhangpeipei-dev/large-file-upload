@@ -46,7 +46,24 @@ python run.py
 
 服务默认监听：`http://127.0.0.1:8000`
 
-## 前端启动
+## 一体化启动（推荐）
+
+先编译前端静态资源，再只启动 FastAPI：
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+```bash
+cd backend
+python run.py
+```
+
+启动后直接访问：`http://127.0.0.1:8000`
+
+## 前端开发模式（可选）
 
 ```bash
 cd frontend
@@ -55,6 +72,21 @@ npm run dev
 ```
 
 前端默认：`http://127.0.0.1:5173`
+
+## Docker 运行
+
+在项目根目录执行：
+
+```bash
+docker build -t large-file-upload:latest .
+docker run --rm -p 8000:8000 \
+  -e JWT_SECRET='change-this-secret' \
+  -e DEFAULT_STORAGE_QUOTA_BYTES=$((50*1024*1024*1024)) \
+  -e DEFAULT_UPLOAD_RATE_BYTES_SEC=$((20*1024*1024)) \
+  large-file-upload:latest
+```
+
+访问：`http://127.0.0.1:8000`
 
 ## 认证与配额
 

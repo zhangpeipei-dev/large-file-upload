@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .auth import get_current_user, get_user_quota, login_user, register_user
 from .schemas import (
@@ -30,6 +33,7 @@ from .service import (
 )
 
 app = FastAPI(title="Large File Upload Service", version="1.1.0")
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 app.add_middleware(
     CORSMiddleware,
@@ -126,3 +130,8 @@ def api_list_history(
     user: dict = Depends(get_current_user),
 ):
     return list_history(user=user, page=page, page_size=page_size)
+
+
+if FRONTEND_DIST.exists():
+    # Serve compiled Vue SPA with FastAPI so only one process is needed.
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
