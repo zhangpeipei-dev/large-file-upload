@@ -55,19 +55,21 @@ class HealthResponse(BaseModel):
 
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=5, max_length=128)
 
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=5, max_length=128)
 
 
 class UserInfo(BaseModel):
     user_id: str
     username: str
+    role: str
     storage_quota_bytes: int
     upload_rate_bytes_sec: int
+    created_at: Optional[str] = None
 
 
 class LoginResponse(BaseModel):

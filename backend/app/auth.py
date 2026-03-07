@@ -56,7 +56,25 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
+        ) from exc
+
+
+def ensure_admin_user():
+    admin_username = "admin"
+    admin = db.get_user_by_username(admin_username)
+    if not admin:
+        user = {
+            "user_id": uuid4().hex,
+            "username": admin_username,
+            "password_hash": hash_password("adminadmin"),
+            "storage_quota_bytes": DEFAULT_STORAGE_QUOTA_BYTES,
+            "upload_rate_bytes_sec": DEFAULT_UPLOAD_RATE_BYTES_SEC,
+            "role": "admin",
+            "created_at": utc_now(),
+        }
+        db.create_user(user)
 
 
 def register_user(username: str, password: str) -> dict:
@@ -69,6 +87,7 @@ def register_user(username: str, password: str) -> dict:
         "password_hash": hash_password(password),
         "storage_quota_bytes": DEFAULT_STORAGE_QUOTA_BYTES,
         "upload_rate_bytes_sec": DEFAULT_UPLOAD_RATE_BYTES_SEC,
+        "role": "pending",
         "created_at": utc_now(),
     }
     db.create_user(user)
@@ -85,6 +104,10 @@ def login_user(username: str, password: str) -> dict:
     if not user or not verify_password(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="username or password is incorrect")
 
+    role = user.get("role", "user")
+    if role == "pending":
+        raise HTTPException(status_code=403, detail="account pending approval")
+
     token = create_token(user["user_id"], user["username"])
     return {
         "access_token": token,
@@ -92,13 +115,16 @@ def login_user(username: str, password: str) -> dict:
         "user": {
             "user_id": user["user_id"],
             "username": user["username"],
+            "role": role,
             "storage_quota_bytes": user["storage_quota_bytes"],
             "upload_rate_bytes_sec": user["upload_rate_bytes_sec"],
         },
     }
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
     if not credentials:
         raise HTTPException(status_code=401, detail="missing bearer token")
 
@@ -124,3 +150,9 @@ def get_user_quota(user: dict) -> dict:
         "available_bytes": max(quota - used_files_bytes - used_uploading_bytes, 0),
         "upload_rate_bytes_sec": int(user["upload_rate_bytes_sec"]),
     }
+
+
+def require_admin(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="admin privileges required")
+    return user

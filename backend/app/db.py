@@ -32,6 +32,7 @@ class Database:
                     password_hash TEXT NOT NULL,
                     storage_quota_bytes INTEGER NOT NULL,
                     upload_rate_bytes_sec INTEGER NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
                     created_at TEXT NOT NULL
                 )
                 """
@@ -81,8 +82,11 @@ class Database:
                 """
             )
 
-            self._ensure_column(conn, "upload_tasks", "user_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(
+                conn, "upload_tasks", "user_id", "TEXT NOT NULL DEFAULT ''"
+            )
             self._ensure_column(conn, "files", "user_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "users", "role", "TEXT NOT NULL DEFAULT 'user'")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str):
@@ -95,8 +99,8 @@ class Database:
         with self.conn() as conn:
             conn.execute(
                 """
-                INSERT INTO users (user_id, username, password_hash, storage_quota_bytes, upload_rate_bytes_sec, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (user_id, username, password_hash, storage_quota_bytes, upload_rate_bytes_sec, role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["user_id"],
@@ -104,25 +108,33 @@ class Database:
                     row["password_hash"],
                     row.get("storage_quota_bytes", DEFAULT_STORAGE_QUOTA_BYTES),
                     row.get("upload_rate_bytes_sec", DEFAULT_UPLOAD_RATE_BYTES_SEC),
+                    row.get("role", "user"),
                     row["created_at"],
                 ),
             )
 
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
-            cur = conn.execute("SELECT * FROM users WHERE username = ? LIMIT 1", (username,))
+            cur = conn.execute(
+                "SELECT * FROM users WHERE username = ? LIMIT 1", (username,)
+            )
             row = cur.fetchone()
             return dict(row) if row else None
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
-            cur = conn.execute("SELECT * FROM users WHERE user_id = ? LIMIT 1", (user_id,))
+            cur = conn.execute(
+                "SELECT * FROM users WHERE user_id = ? LIMIT 1", (user_id,)
+            )
             row = cur.fetchone()
             return dict(row) if row else None
 
     def sum_user_file_size(self, user_id: str) -> int:
         with self.conn() as conn:
-            cur = conn.execute("SELECT COALESCE(SUM(file_size), 0) AS total FROM files WHERE user_id = ?", (user_id,))
+            cur = conn.execute(
+                "SELECT COALESCE(SUM(file_size), 0) AS total FROM files WHERE user_id = ?",
+                (user_id,),
+            )
             row = cur.fetchone()
             return int(row["total"] if row and row["total"] is not None else 0)
 
@@ -175,13 +187,17 @@ class Database:
 
     def get_upload_task(self, upload_id: str) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
-            cur = conn.execute("SELECT * FROM upload_tasks WHERE upload_id = ?", (upload_id,))
+            cur = conn.execute(
+                "SELECT * FROM upload_tasks WHERE upload_id = ?", (upload_id,)
+            )
             row = cur.fetchone()
             if not row:
                 return None
             return self._row_to_upload_task(row)
 
-    def get_upload_task_by_hash(self, user_id: str, file_hash: str) -> Optional[Dict[str, Any]]:
+    def get_upload_task_by_hash(
+        self, user_id: str, file_hash: str
+    ) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
             cur = conn.execute(
                 """
@@ -196,14 +212,27 @@ class Database:
                 return None
             return self._row_to_upload_task(row)
 
-    def update_uploaded_chunks(self, upload_id: str, uploaded_chunks: Iterable[int], status: str, updated_at: str):
+    def update_uploaded_chunks(
+        self,
+        upload_id: str,
+        uploaded_chunks: Iterable[int],
+        status: str,
+        updated_at: str,
+    ):
         with self.conn() as conn:
             conn.execute(
                 "UPDATE upload_tasks SET uploaded_chunks = ?, status = ?, updated_at = ? WHERE upload_id = ?",
-                (json.dumps(sorted(set(uploaded_chunks))), status, updated_at, upload_id),
+                (
+                    json.dumps(sorted(set(uploaded_chunks))),
+                    status,
+                    updated_at,
+                    upload_id,
+                ),
             )
 
-    def add_uploaded_chunk(self, upload_id: str, chunk_index: int, updated_at: str) -> Dict[str, Any]:
+    def add_uploaded_chunk(
+        self, upload_id: str, chunk_index: int, updated_at: str
+    ) -> Dict[str, Any]:
         with self.conn() as conn:
             cur = conn.execute(
                 "SELECT uploaded_chunks, total_chunks FROM upload_tasks WHERE upload_id = ? LIMIT 1",
@@ -250,7 +279,9 @@ class Database:
                 ),
             )
 
-    def get_file_by_hash(self, user_id: str, file_hash: str) -> Optional[Dict[str, Any]]:
+    def get_file_by_hash(
+        self, user_id: str, file_hash: str
+    ) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
             cur = conn.execute(
                 "SELECT * FROM files WHERE user_id = ? AND file_hash = ? LIMIT 1",
@@ -261,18 +292,46 @@ class Database:
 
     def get_file_by_id(self, user_id: str, file_id: str) -> Optional[Dict[str, Any]]:
         with self.conn() as conn:
-            cur = conn.execute("SELECT * FROM files WHERE user_id = ? AND file_id = ? LIMIT 1", (user_id, file_id))
+            cur = conn.execute(
+                "SELECT * FROM files WHERE user_id = ? AND file_id = ? LIMIT 1",
+                (user_id, file_id),
+            )
             row = cur.fetchone()
             return dict(row) if row else None
 
     def list_files(self, user_id: str) -> List[Dict[str, Any]]:
         with self.conn() as conn:
-            cur = conn.execute("SELECT * FROM files WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+            cur = conn.execute(
+                "SELECT * FROM files WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            )
             return [dict(row) for row in cur.fetchall()]
 
     def delete_file(self, user_id: str, file_id: str):
         with self.conn() as conn:
-            conn.execute("DELETE FROM files WHERE user_id = ? AND file_id = ?", (user_id, file_id))
+            conn.execute(
+                "DELETE FROM files WHERE user_id = ? AND file_id = ?",
+                (user_id, file_id),
+            )
+
+    def list_users(self, role_filter: str = None) -> List[Dict[str, Any]]:
+        with self.conn() as conn:
+            if role_filter:
+                cur = conn.execute(
+                    "SELECT * FROM users WHERE role = ? ORDER BY created_at DESC",
+                    (role_filter,),
+                )
+            else:
+                cur = conn.execute("SELECT * FROM users ORDER BY created_at DESC")
+            return [dict(row) for row in cur.fetchall()]
+
+    def update_user_role(self, user_id: str, role: str):
+        with self.conn() as conn:
+            conn.execute("UPDATE users SET role = ? WHERE user_id = ?", (role, user_id))
+
+    def delete_user(self, user_id: str):
+        with self.conn() as conn:
+            conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
 
     def insert_upload_history(self, row: Dict[str, Any]):
         with self.conn() as conn:
@@ -294,7 +353,9 @@ class Database:
                 ),
             )
 
-    def list_upload_history(self, user_id: str, page: int, page_size: int) -> Dict[str, Any]:
+    def list_upload_history(
+        self, user_id: str, page: int, page_size: int
+    ) -> Dict[str, Any]:
         offset = (page - 1) * page_size
         with self.conn() as conn:
             count_row = conn.execute(

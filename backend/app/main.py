@@ -5,7 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .auth import get_current_user, get_user_quota, login_user, register_user
+from .auth import (
+    ensure_admin_user,
+    get_current_user,
+    get_user_quota,
+    login_user,
+    register_user,
+    require_admin,
+)
+from .db import db
 from .schemas import (
     FileItem,
     HealthResponse,
@@ -33,6 +41,13 @@ from .service import (
 )
 
 app = FastAPI(title="Large File Upload Service", version="1.1.0")
+
+
+@app.on_event("startup")
+def startup_event():
+    ensure_admin_user()
+
+
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 app.add_middleware(
@@ -64,6 +79,7 @@ def api_me(user: dict = Depends(get_current_user)):
     return {
         "user_id": user["user_id"],
         "username": user["username"],
+        "role": user.get("role", "user"),
         "storage_quota_bytes": user["storage_quota_bytes"],
         "upload_rate_bytes_sec": user["upload_rate_bytes_sec"],
     }
@@ -151,6 +167,26 @@ def api_public_download(file_id: str, token: str = Query(...)):
 @app.delete("/api/files/{file_id}")
 def api_delete_file(file_id: str, user: dict = Depends(get_current_user)):
     delete_file(user=user, file_id=file_id)
+    return {"ok": True}
+
+
+@app.get("/api/admin/users", response_model=list[UserInfo])
+def api_admin_users(role: str = Query(None), admin: dict = Depends(require_admin)):
+    users = db.list_users(role_filter=role)
+    for u in users:
+        u.pop("password_hash", None)
+    return users
+
+
+@app.post("/api/admin/users/{user_id}/approve")
+def api_admin_approve(user_id: str, admin: dict = Depends(require_admin)):
+    db.update_user_role(user_id, "user")
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{user_id}")
+def api_admin_delete_user(user_id: str, admin: dict = Depends(require_admin)):
+    db.delete_user(user_id)
     return {"ok": True}
 
 

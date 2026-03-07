@@ -2,49 +2,83 @@
   <div class="page">
     <div v-if="ui.message.text" :key="ui.message.id" :class="['toast', ui.message.type]">{{ ui.message.text }}</div>
 
-    <header class="hero">
-      <div>
-        <h1>大文件上传管理系统</h1>
-        <p>分片上传、断点续传、鉴权、配额、限速与历史记录</p>
+    <!-- Login Section -->
+    <div v-if="!auth.token" class="login-container">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo">📁</div>
+          <h1 class="login-title">大文件上传系统</h1>
+          <p class="login-subtitle">安全、稳定、高效的文件管理平台</p>
+        </div>
+        
+        <div v-if="auth.error" class="error-message">{{ auth.error }}</div>
+        
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input 
+            v-model.trim="auth.form.username" 
+            class="form-input" 
+            placeholder="请输入用户名" 
+            @keyup.enter="login"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input 
+            v-model="auth.form.password" 
+            type="password" 
+            class="form-input" 
+            placeholder="请输入密码" 
+            @keyup.enter="login"
+          />
+        </div>
+        
+        <button class="login-btn" @click="login">登 录</button>
+        <button class="secondary-btn" @click="register">注 册 新 账 号</button>
       </div>
-      <button v-if="auth.token" class="ghost" @click="logout">退出登录</button>
-    </header>
+    </div>
 
-    <section v-if="!auth.token" class="panel auth-panel">
-      <div class="panel-head">
-        <h2>登录 / 注册</h2>
-      </div>
-      <div class="auth-grid">
-        <input v-model.trim="auth.form.username" placeholder="用户名（>=3位）" />
-        <input v-model="auth.form.password" type="password" placeholder="密码（>=6位）" />
-        <button @click="login">登录</button>
-        <button class="ghost" @click="register">注册</button>
-      </div>
-      <p v-if="auth.error" class="error">{{ auth.error }}</p>
-    </section>
-
+    <!-- Main App -->
     <template v-else>
+      <header class="hero">
+        <div class="hero-left">
+          <div class="hero-logo">📁</div>
+          <div>
+            <h1 class="hero-title">大文件上传系统</h1>
+            <p class="hero-subtitle">欢迎回来，{{ auth.user?.username }}</p>
+          </div>
+        </div>
+        <button class="logout-btn" @click="logout">退出登录</button>
+      </header>
+
       <nav class="tabs">
-        <button :class="['tab', { active: activeTab === 'upload' }]" @click="activeTab = 'upload'">上传中心</button>
-        <button :class="['tab', { active: activeTab === 'files' }]" @click="activeTab = 'files'">文件管理</button>
-        <button :class="['tab', { active: activeTab === 'history' }]" @click="openHistoryTab">上传记录</button>
-        <button :class="['tab', { active: activeTab === 'quota' }]" @click="activeTab = 'quota'">配额信息</button>
+        <button :class="['tab', { active: activeTab === 'upload' }]" @click="activeTab = 'upload'">📤 上传中心</button>
+        <button :class="['tab', { active: activeTab === 'files' }]" @click="activeTab = 'files'">📁 文件管理</button>
+        <button :class="['tab', { active: activeTab === 'history' }]" @click="openHistoryTab">📋 上传记录</button>
+        <button :class="['tab', { active: activeTab === 'quota' }]" @click="activeTab = 'quota'">💾 配额信息</button>
+        <button v-if="auth.user?.role === 'admin'" :class="['tab', { active: activeTab === 'admin' }]" @click="activeTab = 'admin'">⚙️ 管理员</button>
       </nav>
 
+      <!-- Upload Panel -->
       <section v-show="activeTab === 'upload'" class="panel">
         <div class="panel-head">
-          <h2>上传中心</h2>
+          <h2 class="panel-title">上传中心</h2>
           <label class="pick-btn">
-            选择文件
+            <span>➕ 选择文件</span>
             <input type="file" multiple @change="onPickFiles" />
           </label>
         </div>
-        <p class="tip">前端分片后并发上传，自动断点续传。关键步骤日志支持滚动查看。</p>
+        <p class="tip">支持大文件分片上传、断点续传、多线程并发，智能哈希校验确保文件完整性</p>
 
-        <div v-if="tasks.length === 0" class="empty">暂无上传任务</div>
+        <div v-if="tasks.length === 0" class="empty">
+          <div class="empty-icon">📭</div>
+          <p>暂无上传任务，点击上方按钮开始上传</p>
+        </div>
+        
         <div v-for="task in tasks" :key="task.localId" class="task-card">
           <div class="task-header">
-            <div>
+            <div class="task-info">
               <strong>{{ task.name }}</strong>
               <span>{{ formatBytes(task.size) }}</span>
             </div>
@@ -56,10 +90,10 @@
           </div>
 
           <div class="meta-grid">
-            <span>进度：{{ task.progress.toFixed(2) }}%</span>
-            <span>分片：{{ task.uploadedCount }}/{{ task.totalChunks || '-' }}</span>
-            <span>速度：{{ formatBytes(task.speed) }}/s</span>
-            <span>剩余：{{ formatTime(task.etaSec) }}</span>
+            <span>📊 进度：{{ task.progress.toFixed(1) }}%</span>
+            <span>📦 分片：{{ task.uploadedCount }} / {{ task.totalChunks || '-' }}</span>
+            <span>⚡ 速度：{{ formatBytes(task.speed) }}/s</span>
+            <span>⏱️ 剩余：{{ formatTime(task.etaSec) }}</span>
           </div>
 
           <p class="step-tip">{{ task.stepMessage }}</p>
@@ -68,28 +102,34 @@
           </div>
 
           <div class="actions">
-            <button v-if="task.status === 'pending' || task.status === 'error'" @click="startTask(task)">开始</button>
-            <button v-if="task.status === 'paused'" @click="resumeTask(task)">继续</button>
-            <button v-if="task.status === 'uploading' || task.status === 'hashing'" class="warn" @click="pauseTask(task)">暂停</button>
-            <button class="ghost" @click="removeTask(task.localId)">移除</button>
+            <button v-if="task.status === 'pending' || task.status === 'error'" class="btn btn-primary" @click="startTask(task)">▶️ 开始</button>
+            <button v-if="task.status === 'paused'" class="btn btn-primary" @click="resumeTask(task)">▶️ 继续</button>
+            <button v-if="task.status === 'uploading' || task.status === 'hashing'" class="btn btn-secondary" @click="pauseTask(task)">⏸️ 暂停</button>
+            <button class="btn btn-secondary" @click="removeTask(task.localId)">🗑️ 移除</button>
           </div>
 
-          <p v-if="task.error" class="error">{{ task.error }}</p>
+          <p v-if="task.error" class="task-error">{{ task.error }}</p>
         </div>
       </section>
 
+      <!-- Files Panel -->
       <section v-show="activeTab === 'files'" class="panel">
         <div class="panel-head">
-          <h2>文件管理</h2>
-          <button class="ghost" @click="refreshFiles">刷新列表</button>
+          <h2 class="panel-title">文件管理</h2>
+          <button class="btn btn-secondary" @click="refreshFiles">🔄 刷新列表</button>
         </div>
-        <div v-if="files.length === 0" class="empty">暂无已上传文件</div>
+        
+        <div v-if="files.length === 0" class="empty">
+          <div class="empty-icon">📂</div>
+          <p>暂无已上传文件</p>
+        </div>
+        
         <table v-else>
           <thead>
             <tr>
               <th>文件名</th>
               <th>大小</th>
-              <th>哈希</th>
+              <th>哈希值</th>
               <th>上传时间</th>
               <th>操作</th>
             </tr>
@@ -101,24 +141,29 @@
               <td class="hash">{{ file.file_hash }}</td>
               <td>{{ formatDate(file.created_at) }}</td>
               <td>
-                <button class="link" @click="downloadFile(file)">下载</button>
-                <button class="link" @click="showCopyCommands(file)">复制命令</button>
-                <button class="link danger" @click="askDelete(file.file_id)">删除</button>
+                <button class="btn btn-link" @click="downloadFile(file)">⬇️ 下载</button>
+                <button class="btn btn-link" @click="showCopyCommands(file)">📋 复制</button>
+                <button class="btn btn-link danger" @click="askDelete(file.file_id)">🗑️ 删除</button>
               </td>
             </tr>
           </tbody>
         </table>
       </section>
 
+      <!-- History Panel -->
       <section v-show="activeTab === 'history'" class="panel">
         <div class="panel-head">
-          <h2>上传记录</h2>
-          <button class="ghost" :disabled="history.loading" @click="refreshHistory(true)">
-            {{ history.loading ? '刷新中...' : '刷新记录' }}
+          <h2 class="panel-title">上传记录</h2>
+          <button class="btn btn-secondary" :disabled="history.loading" @click="refreshHistory(true)">
+            {{ history.loading ? '刷新中...' : '🔄 刷新记录' }}
           </button>
         </div>
 
-        <div v-if="history.items.length === 0" class="empty">暂无上传记录</div>
+        <div v-if="history.items.length === 0" class="empty">
+          <div class="empty-icon">📜</div>
+          <p>暂无上传记录</p>
+        </div>
+        
         <table v-else>
           <thead>
             <tr>
@@ -141,36 +186,124 @@
         </table>
 
         <div class="pager">
-          <button class="ghost" :disabled="history.page <= 1 || history.loading" @click="goHistoryPage(history.page - 1)">上一页</button>
+          <button class="btn btn-secondary" :disabled="history.page <= 1 || history.loading" @click="goHistoryPage(history.page - 1)">⬅️ 上一页</button>
           <span>第 {{ history.page }} / {{ totalHistoryPages }} 页，共 {{ history.total }} 条</span>
-          <button class="ghost" :disabled="history.page >= totalHistoryPages || history.loading" @click="goHistoryPage(history.page + 1)">下一页</button>
+          <button class="btn btn-secondary" :disabled="history.page >= totalHistoryPages || history.loading" @click="goHistoryPage(history.page + 1)">下一页 ➡️</button>
         </div>
       </section>
 
+      <!-- Quota Panel -->
       <section v-show="activeTab === 'quota'" class="panel">
         <div class="panel-head">
-          <h2>配额信息</h2>
-          <button class="ghost" :disabled="quotaLoading" @click="refreshQuota(true)">
-            {{ quotaLoading ? '刷新中...' : '刷新配额' }}
+          <h2 class="panel-title">配额信息</h2>
+          <button class="btn btn-secondary" :disabled="quotaLoading" @click="refreshQuota(true)">
+            {{ quotaLoading ? '刷新中...' : '🔄 刷新配额' }}
           </button>
         </div>
-        <div class="meta-grid">
-          <span>用户：{{ auth.user?.username }}</span>
-          <span>限速：{{ formatBytes(auth.quota?.upload_rate_bytes_sec || 0) }}/s</span>
-          <span>总配额：{{ formatBytes(auth.quota?.storage_quota_bytes || 0) }}</span>
-          <span>已用文件：{{ formatBytes(auth.quota?.used_files_bytes || 0) }}</span>
-          <span>上传中预占：{{ formatBytes(auth.quota?.used_uploading_bytes || 0) }}</span>
-          <span>剩余：{{ formatBytes(auth.quota?.available_bytes || 0) }}</span>
+        
+        <div class="quota-grid">
+          <div class="quota-card">
+            <div class="quota-value">{{ formatBytes(auth.quota?.storage_quota_bytes || 0) }}</div>
+            <div class="quota-label">总配额</div>
+          </div>
+          <div class="quota-card">
+            <div class="quota-value">{{ formatBytes(auth.quota?.used_files_bytes || 0) }}</div>
+            <div class="quota-label">已用空间</div>
+          </div>
+          <div class="quota-card">
+            <div class="quota-value">{{ formatBytes(auth.quota?.available_bytes || 0) }}</div>
+            <div class="quota-label">剩余空间</div>
+          </div>
+          <div class="quota-card">
+            <div class="quota-value">{{ formatBytes(auth.quota?.used_uploading_bytes || 0) }}</div>
+            <div class="quota-label">上传中</div>
+          </div>
+          <div class="quota-card">
+            <div class="quota-value">{{ formatBytes(auth.quota?.upload_rate_bytes_sec || 0) }}/s</div>
+            <div class="quota-label">上传速度</div>
+          </div>
+          <div class="quota-card">
+            <div class="quota-value">{{ auth.user?.username }}</div>
+            <div class="quota-label">当前用户</div>
+          </div>
         </div>
+      </section>
+
+      <!-- Admin Panel -->
+      <section v-show="activeTab === 'admin'" class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">用户管理</h2>
+          <div style="display: flex; gap: 10px;">
+            <select v-model="admin.roleFilter" @change="refreshUsers" class="form-input" style="width: auto; padding: 8px 16px;">
+              <option value="">全部用户</option>
+              <option value="pending">待审核</option>
+              <option value="user">已通过</option>
+              <option value="admin">管理员</option>
+            </select>
+            <button class="btn btn-secondary" @click="refreshUsers">🔄 刷新</button>
+          </div>
+        </div>
+
+        <div class="stats-grid" style="margin-bottom: 24px;">
+          <div class="stat-card">
+            <div class="stat-value">{{ admin.users.length }}</div>
+            <div class="stat-label">用户总数</div>
+          </div>
+          <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.3);">
+            <div class="stat-value" style="color: var(--warning);">{{ admin.users.filter(u => u.role === 'pending').length }}</div>
+            <div class="stat-label">待审核</div>
+          </div>
+          <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.3);">
+            <div class="stat-value" style="color: var(--success);">{{ admin.users.filter(u => u.role === 'user').length }}</div>
+            <div class="stat-label">已通过</div>
+          </div>
+          <div class="stat-card" style="border-color: rgba(99, 102, 241, 0.3);">
+            <div class="stat-value" style="color: var(--accent-primary);">{{ admin.users.filter(u => u.role === 'admin').length }}</div>
+            <div class="stat-label">管理员</div>
+          </div>
+        </div>
+        
+        <div v-if="admin.users.length === 0" class="empty">
+          <div class="empty-icon">👥</div>
+          <p>暂无用户</p>
+        </div>
+        
+        <table v-else>
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>角色</th>
+              <th>注册时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="user in admin.users" :key="user.user_id">
+              <td>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div class="avatar">{{ user.username.charAt(0).toUpperCase() }}</div>
+                  {{ user.username }}
+                </div>
+              </td>
+              <td><span :class="['badge', user.role]">{{ roleText(user.role) }}</span></td>
+              <td>{{ formatDate(user.created_at) }}</td>
+              <td>
+                <button v-if="user.role === 'pending'" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px;" @click="approveUser(user.user_id)">✅ 批准</button>
+                <button class="btn btn-link danger" style="padding: 8px;" @click="deleteUser(user.user_id)">🗑️</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
     </template>
 
+    <!-- Delete Modal -->
     <div v-if="ui.deleteConfirm.visible" class="modal-mask">
       <div class="modal-card">
         <p>确认删除该文件？删除后不可恢复。</p>
         <div class="modal-actions">
-          <button class="ghost" @click="ui.deleteConfirm.visible = false">取消</button>
-          <button class="warn" @click="confirmDelete">确认删除</button>
+          <button class="btn btn-secondary" @click="ui.deleteConfirm.visible = false">取消</button>
+          <button class="btn btn-danger" @click="confirmDelete">确认删除</button>
         </div>
       </div>
     </div>
@@ -210,6 +343,12 @@ const auth = reactive({
     password: ''
   }
 })
+
+const admin = reactive({
+  users: [],
+  roleFilter: ''
+})
+
 const ui = reactive({
   message: { text: '', type: 'info', timer: null, id: 0 },
   deleteConfirm: { visible: false, fileId: '' }
@@ -312,7 +451,12 @@ async function login() {
   auth.token = data.access_token
   auth.user = data.user
   localStorage.setItem(TOKEN_KEY, auth.token)
-  await Promise.all([refreshQuota(false), refreshFiles(), refreshHistory(false)])
+  await Promise.all([
+    refreshQuota(false), 
+    refreshFiles(), 
+    refreshHistory(false),
+    data.user.role === 'admin' ? refreshUsers() : Promise.resolve()
+  ])
   showMessage('登录成功', 'success')
 }
 
@@ -680,8 +824,18 @@ function formatTime(sec) {
 }
 
 function formatDate(value) {
+  if (!value) return '-'
   try {
-    return new Date(value).toLocaleString()
+    const date = new Date(value)
+    if (isNaN(date.getTime())) return value
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    })
   } catch {
     return value
   }
@@ -697,6 +851,15 @@ function statusText(status) {
     error: '失败'
   }
   return map[status] || status
+}
+
+function roleText(role) {
+  const map = {
+    pending: '待审核',
+    user: '用户',
+    admin: '管理员'
+  }
+  return map[role] || role
 }
 
 function sleep(ms) {
@@ -739,10 +902,48 @@ async function errorDetail(res) {
   }
 }
 
+async function refreshUsers() {
+  const url = admin.roleFilter ? `/api/admin/users?role=${admin.roleFilter}` : '/api/admin/users'
+  const res = await apiFetch(url)
+  if (res.ok) {
+    admin.users = await res.json()
+  } else {
+    showMessage(await errorText(res), 'error')
+  }
+}
+
+async function approveUser(userId) {
+  const res = await apiFetch(`/api/admin/users/${userId}/approve`, { method: 'POST' })
+  if (res.ok) {
+    showMessage('用户已批准', 'success')
+    await refreshUsers()
+  } else {
+    showMessage(await errorText(res), 'error')
+  }
+}
+
+async function deleteUser(userId) {
+  if (!confirm('确认删除此用户？')) return
+  const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+  if (res.ok) {
+    showMessage('用户已删除', 'success')
+    await refreshUsers()
+  } else {
+    showMessage(await errorText(res), 'error')
+  }
+}
+
 onMounted(async () => {
   if (auth.token) {
     try {
-      await Promise.all([refreshQuota(false), refreshFiles(), refreshHistory(false)])
+      const promises = [refreshQuota(false), refreshFiles(), refreshHistory(false)]
+      const meRes = await apiFetch('/api/auth/me')
+      const meData = await meRes.json()
+      auth.user = meData
+      if (meData.role === 'admin') {
+        promises.push(refreshUsers())
+      }
+      await Promise.all(promises)
     } catch {
       logout()
     }
