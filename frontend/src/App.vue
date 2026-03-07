@@ -102,6 +102,7 @@
               <td>{{ formatDate(file.created_at) }}</td>
               <td>
                 <button class="link" @click="downloadFile(file)">下载</button>
+                <button class="link" @click="showCopyCommands(file)">复制命令</button>
                 <button class="link danger" @click="askDelete(file.file_id)">删除</button>
               </td>
             </tr>
@@ -619,6 +620,27 @@ async function downloadFile(file) {
   a.click()
   URL.revokeObjectURL(url)
   showMessage('下载已开始', 'success')
+}
+
+function showCopyCommands(file) {
+  const baseUrl = window.location.origin
+  const downloadUrl = `${baseUrl}/api/public/download/${file.file_id}?token=${auth.token}`
+  const curlCmd = `curl -L -o "${file.file_name}" "${downloadUrl}"`
+  const wgetCmd = `wget -O "${file.file_name}" "${downloadUrl}"`
+
+  const commands = `文件: ${file.file_name}
+
+curl 命令:
+${curlCmd}
+
+wget 命令:
+${wgetCmd}`
+
+  navigator.clipboard.writeText(curlCmd).then(() => {
+    showMessage('curl 命令已复制到剪贴板', 'success')
+  }).catch(() => {
+    showMessage('复制失败，请手动复制', 'error')
+  })
 }
 
 async function calculateFileHash(file) {
