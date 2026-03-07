@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -97,7 +97,9 @@ async def api_upload_chunk(
     chunk: UploadFile = File(...),
     user: dict = Depends(get_current_user),
 ):
-    await save_chunk(user=user, upload_id=upload_id, chunk_index=chunk_index, chunk_data=chunk)
+    await save_chunk(
+        user=user, upload_id=upload_id, chunk_index=chunk_index, chunk_data=chunk
+    )
     return {"ok": True}
 
 
@@ -114,7 +116,36 @@ def api_list_files(user: dict = Depends(get_current_user)):
 @app.get("/api/files/{file_id}/download")
 def api_download_file(file_id: str, user: dict = Depends(get_current_user)):
     record = get_file(user=user, file_id=file_id)
-    return FileResponse(record["file_path"], filename=record["file_name"], media_type="application/octet-stream")
+    return FileResponse(
+        record["file_path"],
+        filename=record["file_name"],
+        media_type="application/octet-stream",
+    )
+
+
+@app.get("/api/public/download/{file_id}")
+def api_public_download(file_id: str, token: str = Query(...)):
+    from .auth import decode_token, db
+
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid or expired token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="invalid token payload")
+
+    user = db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="user not found")
+
+    record = get_file(user=user, file_id=file_id)
+    return FileResponse(
+        record["file_path"],
+        filename=record["file_name"],
+        media_type="application/octet-stream",
+    )
 
 
 @app.delete("/api/files/{file_id}")
@@ -134,4 +165,6 @@ def api_list_history(
 
 if FRONTEND_DIST.exists():
     # Serve compiled Vue SPA with FastAPI so only one process is needed.
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+    app.mount(
+        "/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend"
+    )
