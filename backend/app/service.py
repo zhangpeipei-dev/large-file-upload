@@ -54,7 +54,17 @@ def _ensure_quota(user: Dict, incoming_file_size: int):
         raise HTTPException(status_code=403, detail="storage quota exceeded")
 
 
-def init_upload(user: Dict, file_name: str, file_size: int, file_hash: str, chunk_size: int) -> Dict:
+def init_upload(
+    user: Dict,
+    file_name: str,
+    file_size: int,
+    file_hash: str,
+    chunk_size: int,
+    group_id: str = None,
+    group_name: str = None,
+    group_total_files: int = None,
+    group_total_size: int = None,
+) -> Dict:
     if chunk_size > MAX_CHUNK_SIZE:
         raise HTTPException(status_code=400, detail=f"chunk_size exceeds limit {MAX_CHUNK_SIZE}")
 
@@ -63,18 +73,21 @@ def init_upload(user: Dict, file_name: str, file_size: int, file_hash: str, chun
 
     existing_file = db.get_file_by_hash(user["user_id"], file_hash)
     if existing_file:
-        db.insert_upload_history(
-            {
-                "record_id": uuid4().hex,
-                "user_id": user["user_id"],
-                "file_name": sanitize_filename(file_name),
-                "file_size": file_size,
-                "file_hash": file_hash,
-                "status": "instant",
-                "message": "file already exists, instant upload",
-                "created_at": utc_now(),
-            }
-        )
+        if not group_id:
+            db.insert_upload_history(
+                {
+                    "record_id": uuid4().hex,
+                    "user_id": user["user_id"],
+                    "file_name": sanitize_filename(file_name),
+                    "file_size": file_size,
+                    "file_hash": file_hash,
+                    "status": "instant",
+                    "message": "file already exists, instant upload",
+                    "created_at": utc_now(),
+                    "group_id": None,
+                    "is_group": 0,
+                }
+            )
         return {
             "file_exists": True,
             "file_id": existing_file["file_id"],
@@ -109,6 +122,10 @@ def init_upload(user: Dict, file_name: str, file_size: int, file_hash: str, chun
         "status": "uploading",
         "created_at": now,
         "updated_at": now,
+        "group_id": group_id,
+        "group_name": group_name,
+        "group_total_files": group_total_files,
+        "group_total_size": group_total_size,
     }
     db.upsert_upload_task(task)
     get_upload_dir(upload_id)
@@ -212,18 +229,21 @@ def merge_chunks(user: Dict, upload_id: str) -> Dict:
             "created_at": utc_now(),
         }
     )
-    db.insert_upload_history(
-        {
-            "record_id": uuid4().hex,
-            "user_id": user["user_id"],
-            "file_name": task["file_name"],
-            "file_size": task["file_size"],
-            "file_hash": task["file_hash"],
-            "status": "success",
-            "message": "upload merged and verified",
-            "created_at": utc_now(),
-        }
-    )
+    if not task.get("group_id"):
+        db.insert_upload_history(
+            {
+                "record_id": uuid4().hex,
+                "user_id": user["user_id"],
+                "file_name": task["file_name"],
+                "file_size": task["file_size"],
+                "file_hash": task["file_hash"],
+                "status": "success",
+                "message": "upload merged and verified",
+                "created_at": utc_now(),
+                "group_id": None,
+                "is_group": 0,
+            }
+        )
     db.delete_upload_task(upload_id)
     shutil.rmtree(upload_dir, ignore_errors=True)
 
@@ -237,6 +257,10 @@ def merge_chunks(user: Dict, upload_id: str) -> Dict:
 
 def list_files(user: Dict) -> List[Dict]:
     return db.list_files(user["user_id"])
+
+
+def get_file_by_id(user: Dict, file_id: str) -> Dict:
+    return get_file(user=user, file_id=file_id)
 
 
 def delete_file(user: Dict, file_id: str):
@@ -267,3 +291,43 @@ def list_history(user: Dict, page: int, page_size: int) -> Dict:
         "page": page,
         "page_size": page_size,
     }
+
+
+def complete_group_upload(
+    user: Dict,
+    group_id: str,
+    group_name: str,
+    group_total_files: int,
+    group_total_size: int,
+    status: str,
+    message: str = None,
+) -> Dict:
+    existing = db.get_history_by_group_id(user["user_id"], group_id)
+    if existing:
+        if status == "success" and existing.get("status") != "success":
+            db.update_history_by_group_id(
+                user_id=user["user_id"],
+                group_id=group_id,
+                status=status,
+                message=message or existing.get("message") or "文件夹上传完成",
+                file_size=group_total_size,
+                created_at=utc_now(),
+            )
+        return {"ok": True}
+
+    msg = message or ("文件夹上传完成" if status == "success" else "文件夹上传失败")
+    db.insert_upload_history(
+        {
+            "record_id": uuid4().hex,
+            "user_id": user["user_id"],
+            "file_name": group_name,
+            "file_size": group_total_size,
+            "file_hash": group_id,
+            "status": status,
+            "message": msg,
+            "created_at": utc_now(),
+            "group_id": group_id,
+            "is_group": 1,
+        }
+    )
+    return {"ok": True}

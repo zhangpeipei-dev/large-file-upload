@@ -8,6 +8,10 @@ class InitUploadRequest(BaseModel):
     file_size: int = Field(..., gt=0)
     file_hash: str = Field(..., min_length=16)
     chunk_size: int = Field(..., gt=0)
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
+    group_total_files: Optional[int] = None
+    group_total_size: Optional[int] = None
 
 
 class InitUploadResponse(BaseModel):
@@ -95,6 +99,8 @@ class HistoryItem(BaseModel):
     status: str
     message: str
     created_at: str
+    group_id: Optional[str] = None
+    is_group: Optional[int] = None
 
 
 class HistoryListResponse(BaseModel):
@@ -102,3 +108,20 @@ class HistoryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class CompleteGroupRequest(BaseModel):
+    group_id: str = Field(..., min_length=6)
+    group_name: str = Field(..., min_length=1)
+    group_total_files: int = Field(..., gt=0)
+    group_total_size: int = Field(..., gt=0)
+    status: str = Field(..., min_length=1)
+    message: Optional[str] = None
+
+
+class CompleteGroupResponse(BaseModel):
+    ok: bool
+
+
+class ZipFilesRequest(BaseModel):
+    file_ids: List[str] = Field(..., min_length=1)

@@ -1,8 +1,10 @@
 from pathlib import Path
+import io
+import zipfile
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import (
@@ -22,6 +24,9 @@ from .schemas import (
     InitUploadResponse,
     LoginRequest,
     LoginResponse,
+    CompleteGroupRequest,
+    CompleteGroupResponse,
+    ZipFilesRequest,
     MergeRequest,
     MergeResponse,
     QuotaResponse,
@@ -32,12 +37,14 @@ from .schemas import (
 from .service import (
     delete_file,
     get_file,
+    get_file_by_id,
     init_upload,
     list_history,
     list_files,
     merge_chunks,
     save_chunk,
     status,
+    complete_group_upload,
 )
 
 app = FastAPI(title="Large File Upload Service", version="1.1.0")
@@ -98,6 +105,10 @@ def api_init_upload(payload: InitUploadRequest, user: dict = Depends(get_current
         file_size=payload.file_size,
         file_hash=payload.file_hash,
         chunk_size=payload.chunk_size,
+        group_id=payload.group_id,
+        group_name=payload.group_name,
+        group_total_files=payload.group_total_files,
+        group_total_size=payload.group_total_size,
     )
 
 
@@ -124,6 +135,21 @@ def api_merge(payload: MergeRequest, user: dict = Depends(get_current_user)):
     return merge_chunks(user=user, upload_id=payload.upload_id)
 
 
+@app.post("/api/uploads/group/complete", response_model=CompleteGroupResponse)
+def api_complete_group(
+    payload: CompleteGroupRequest, user: dict = Depends(get_current_user)
+):
+    return complete_group_upload(
+        user=user,
+        group_id=payload.group_id,
+        group_name=payload.group_name,
+        group_total_files=payload.group_total_files,
+        group_total_size=payload.group_total_size,
+        status=payload.status,
+        message=payload.message,
+    )
+
+
 @app.get("/api/files", response_model=list[FileItem])
 def api_list_files(user: dict = Depends(get_current_user)):
     return list_files(user=user)
@@ -137,6 +163,73 @@ def api_download_file(file_id: str, user: dict = Depends(get_current_user)):
         filename=Path(record["file_name"]).name,
         media_type="application/octet-stream",
     )
+
+
+@app.get("/api/files/zip")
+def api_download_zip(path: str = Query(default=""), user: dict = Depends(get_current_user)):
+    all_files = list_files(user=user)
+    prefix = path.strip("/").strip()
+
+    def in_scope(file_name: str) -> bool:
+        if not prefix:
+            return True
+        normalized = file_name.strip("/")
+        return normalized == prefix or normalized.startswith(f"{prefix}/")
+
+    selected = [f for f in all_files if in_scope(str(f.get("file_name") or ""))]
+    if not selected:
+        raise HTTPException(status_code=404, detail="no files under path")
+
+    def zip_stream():
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for item in selected:
+                record = get_file_by_id(user=user, file_id=item["file_id"])
+                full_path = record["file_path"]
+                arc_name = record["file_name"].strip("/")
+                if prefix:
+                    if arc_name == prefix:
+                        arc_name = Path(arc_name).name
+                    elif arc_name.startswith(f"{prefix}/"):
+                        arc_name = arc_name[len(prefix) + 1 :]
+                zf.write(full_path, arc_name)
+        buffer.seek(0)
+        while True:
+            chunk = buffer.read(1024 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
+    zip_name = f"{Path(prefix).name or 'files'}.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{zip_name}"'}
+    return StreamingResponse(zip_stream(), media_type="application/zip", headers=headers)
+
+
+@app.post("/api/files/zip/selected")
+def api_download_selected_zip(
+    payload: ZipFilesRequest, user: dict = Depends(get_current_user)
+):
+    unique_ids = list(dict.fromkeys(payload.file_ids))
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="no file ids")
+
+    def zip_stream():
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_id in unique_ids:
+                record = get_file_by_id(user=user, file_id=file_id)
+                full_path = record["file_path"]
+                arc_name = record["file_name"].strip("/")
+                zf.write(full_path, arc_name)
+        buffer.seek(0)
+        while True:
+            chunk = buffer.read(1024 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
+    headers = {"Content-Disposition": 'attachment; filename="selected-files.zip"'}
+    return StreamingResponse(zip_stream(), media_type="application/zip", headers=headers)
 
 
 @app.get("/api/public/download/{file_id}")

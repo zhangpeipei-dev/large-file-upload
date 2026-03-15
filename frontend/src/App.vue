@@ -6,7 +6,11 @@
     <div v-if="!auth.token" class="login-container">
       <div class="login-card">
         <div class="login-header">
-          <div class="login-logo">📁</div>
+          <div class="login-logo">
+            <svg viewBox="0 0 24 24" class="logo-icon" aria-hidden="true">
+              <path d="M3 6.5a2.5 2.5 0 0 1 2.5-2.5h4.6l2 2.4H18a2.5 2.5 0 0 1 2.5 2.5v7.6A2.5 2.5 0 0 1 18 19H5.5A2.5 2.5 0 0 1 3 16.5V6.5Z" fill="currentColor"/>
+            </svg>
+          </div>
           <h1 class="login-title">大文件上传系统</h1>
           <p class="login-subtitle">安全、稳定、高效的文件管理平台</p>
         </div>
@@ -43,7 +47,11 @@
     <template v-else>
       <header class="hero">
         <div class="hero-left">
-          <div class="hero-logo">📁</div>
+          <div class="hero-logo">
+            <svg viewBox="0 0 24 24" class="logo-icon" aria-hidden="true">
+              <path d="M3 6.5a2.5 2.5 0 0 1 2.5-2.5h4.6l2 2.4H18a2.5 2.5 0 0 1 2.5 2.5v7.6A2.5 2.5 0 0 1 18 19H5.5A2.5 2.5 0 0 1 3 16.5V6.5Z" fill="currentColor"/>
+            </svg>
+          </div>
           <div>
             <h1 class="hero-title">大文件上传系统</h1>
             <p class="hero-subtitle">欢迎回来，{{ auth.user?.username }}</p>
@@ -109,10 +117,11 @@
           </div>
 
           <div class="actions">
-            <button v-if="task.status === 'pending' || task.status === 'error'" class="btn btn-primary" @click="startTask(task)">▶️ 开始</button>
+            <button v-if="task.status === 'pending' || task.status === 'error'" class="btn btn-primary" @click="startTask(task)">开始</button>
             <button v-if="task.status === 'paused'" class="btn btn-primary" @click="resumeTask(task)">▶️ 继续</button>
-            <button v-if="task.status === 'uploading' || task.status === 'hashing'" class="btn btn-secondary" @click="pauseTask(task)">⏸️ 暂停</button>
-            <button class="btn btn-secondary" @click="removeTask(task.localId)">🗑️ 移除</button>
+            <button v-if="task.status === 'uploading' || task.status === 'hashing'" class="btn btn-secondary" @click="pauseTask(task)">暂停</button>
+            <button v-if="task.kind === 'folder' && task.status === 'error'" class="btn btn-secondary" @click="skipFolderError(task)">跳过当前文件继续</button>
+            <button class="btn btn-secondary" @click="removeTask(task.localId)">移除</button>
           </div>
 
           <p v-if="task.error" class="task-error">{{ task.error }}</p>
@@ -120,45 +129,117 @@
       </section>
 
       <!-- Files Panel -->
-      <section v-show="activeTab === 'files'" class="panel">
+      <section v-show="activeTab === 'files'" class="panel panel-fixed">
         <div class="panel-head">
-          <h2 class="panel-title">文件管理</h2>
-          <button class="btn btn-secondary" @click="refreshFiles">🔄 刷新列表</button>
+          <div>
+            <h2 class="panel-title">文件管理</h2>
+            <div class="breadcrumb">
+              <button class="link-btn" :disabled="fileNav.path.length === 0" @click="goRoot">根目录</button>
+              <span v-for="(part, idx) in fileNav.path" :key="`crumb-${idx}`">
+                <span class="crumb-sep">/</span>
+                <button class="link-btn" @click="goToCrumb(idx)">{{ part }}</button>
+              </span>
+            </div>
+          </div>
+          <div class="file-actions">
+            <button class="btn btn-secondary" @click="refreshFiles">刷新列表</button>
+            <button class="btn btn-primary" :disabled="selectedCount === 0" @click="downloadSelectionZip">
+              打包下载（已选 {{ selectedCount }}）
+            </button>
+            <button class="btn btn-secondary" :disabled="selectedCount === 0" @click="clearSelection">清空选择</button>
+          </div>
         </div>
-        
-        <div v-if="files.length === 0" class="empty">
-          <div class="empty-icon">📂</div>
-          <p>暂无已上传文件</p>
+
+        <div class="panel-body">
+          <div v-if="fileItems.length === 0" class="empty">
+            <div class="empty-icon">📂</div>
+            <p>暂无已上传文件</p>
+          </div>
+
+          <table v-else class="file-table">
+            <thead>
+              <tr>
+                <th class="col-check">
+                  <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectVisible" />
+                </th>
+                <th>名称</th>
+                <th>大小</th>
+                <th>类型</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="fileNav.path.length > 0">
+                <td class="col-check"></td>
+                <td>
+                  <div class="file-entry">
+                    <span class="icon-wrap folder">
+                      <svg viewBox="0 0 24 24" class="file-icon" aria-hidden="true">
+                        <path d="M3 6.5a2.5 2.5 0 0 1 2.5-2.5h4.6l2 2.4H18a2.5 2.5 0 0 1 2.5 2.5v7.6A2.5 2.5 0 0 1 18 19H5.5A2.5 2.5 0 0 1 3 16.5V6.5Z" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <button class="link-btn" @click="goUp">.. 返回上级</button>
+                  </div>
+                </td>
+                <td>-</td>
+                <td>目录</td>
+                <td>-</td>
+                <td></td>
+              </tr>
+              <tr v-for="item in pagedFileItems" :key="item.key">
+                <td class="col-check">
+                  <input type="checkbox" :checked="item.selected" @change="toggleSelection(item)" />
+                </td>
+                <td>
+                  <div class="file-entry">
+                    <span v-if="item.type === 'folder'" class="icon-wrap folder">
+                      <svg viewBox="0 0 24 24" class="file-icon" aria-hidden="true">
+                        <path d="M3 6.5a2.5 2.5 0 0 1 2.5-2.5h4.6l2 2.4H18a2.5 2.5 0 0 1 2.5 2.5v7.6A2.5 2.5 0 0 1 18 19H5.5A2.5 2.5 0 0 1 3 16.5V6.5Z" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <span v-else class="icon-wrap file">
+                      <svg viewBox="0 0 24 24" class="file-icon" aria-hidden="true">
+                        <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" fill="currentColor"/>
+                        <path d="M14 3v5h5" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <button v-if="item.type === 'folder'" class="link-btn" @click="openFolder(item.name)">{{ item.name }}</button>
+                    <span v-else>{{ item.displayName }}</span>
+                  </div>
+                </td>
+                <td>{{ formatBytes(item.size) }}</td>
+                <td>{{ item.type === 'folder' ? `目录（${item.totalFiles}）` : '文件' }}</td>
+                <td>{{ formatDate(item.updatedAt) }}</td>
+                <td>
+                  <button v-if="item.type === 'folder'" class="btn btn-link" @click="openFolder(item.name)">进入</button>
+                  <template v-else>
+                    <button class="btn btn-link" @click="previewFile(item.file)">预览</button>
+                    <button class="btn btn-link" @click="downloadFile(item.file)">下载</button>
+                    <button class="btn btn-link" @click="showCopyCommands(item.file)">复制</button>
+                    <button class="btn btn-link danger" @click="askDelete(item.file.file_id)">删除</button>
+                  </template>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        
-        <table v-else>
-          <thead>
-            <tr>
-              <th>文件名</th>
-              <th>大小</th>
-              <th>哈希值</th>
-              <th>上传时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="file in files" :key="file.file_id">
-              <td>{{ file.file_name }}</td>
-              <td>{{ formatBytes(file.file_size) }}</td>
-              <td class="hash">{{ file.file_hash }}</td>
-              <td>{{ formatDate(file.created_at) }}</td>
-              <td>
-                <button class="btn btn-link" @click="downloadFile(file)">⬇️ 下载</button>
-                <button class="btn btn-link" @click="showCopyCommands(file)">📋 复制</button>
-                <button class="btn btn-link danger" @click="askDelete(file.file_id)">🗑️ 删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+
+        <div class="panel-footer">
+          <div class="pager fixed">
+            <button class="btn btn-secondary" :disabled="fileNav.page <= 1" @click="goFilePage(fileNav.page - 1)">上一页</button>
+            <span>第 {{ fileNav.page }} / {{ totalFilePages }} 页，共 {{ fileItems.length }} 条</span>
+            <button class="btn btn-secondary" :disabled="fileNav.page >= totalFilePages" @click="goFilePage(fileNav.page + 1)">下一页</button>
+            <div class="pager-jump">
+              <input v-model="fileNav.jump" class="form-input jump-input" placeholder="跳页" @keyup.enter="jumpFilePage" />
+              <button class="btn btn-secondary" @click="jumpFilePage">跳转</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- History Panel -->
-      <section v-show="activeTab === 'history'" class="panel">
+      <section v-show="activeTab === 'history'" class="panel panel-fixed">
         <div class="panel-head">
           <h2 class="panel-title">上传记录</h2>
           <button class="btn btn-secondary" :disabled="history.loading" @click="refreshHistory(true)">
@@ -166,36 +247,59 @@
           </button>
         </div>
 
-        <div v-if="history.items.length === 0" class="empty">
-          <div class="empty-icon">📜</div>
-          <p>暂无上传记录</p>
+        <div class="panel-body">
+          <div v-if="history.items.length === 0" class="empty">
+            <div class="empty-icon">📜</div>
+            <p>暂无上传记录</p>
+          </div>
+          
+          <table v-else>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>名称</th>
+                <th>大小</th>
+                <th>状态</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in history.items" :key="item.record_id">
+                <td>{{ formatDate(item.created_at) }}</td>
+                <td>
+                  <div class="file-entry">
+                    <span v-if="item.is_group" class="icon-wrap folder">
+                      <svg viewBox="0 0 24 24" class="file-icon" aria-hidden="true">
+                        <path d="M3 6.5a2.5 2.5 0 0 1 2.5-2.5h4.6l2 2.4H18a2.5 2.5 0 0 1 2.5 2.5v7.6A2.5 2.5 0 0 1 18 19H5.5A2.5 2.5 0 0 1 3 16.5V6.5Z" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <span v-else class="icon-wrap file">
+                      <svg viewBox="0 0 24 24" class="file-icon" aria-hidden="true">
+                        <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" fill="currentColor"/>
+                        <path d="M14 3v5h5" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <span>{{ item.file_name }}</span>
+                  </div>
+                </td>
+                <td>{{ formatBytes(item.file_size) }}</td>
+                <td><span :class="['badge', item.status]">{{ item.status }}</span></td>
+                <td>{{ item.message }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        
-        <table v-else>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>文件名</th>
-              <th>大小</th>
-              <th>状态</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in history.items" :key="item.record_id">
-              <td>{{ formatDate(item.created_at) }}</td>
-              <td>{{ item.file_name }}</td>
-              <td>{{ formatBytes(item.file_size) }}</td>
-              <td><span :class="['badge', item.status]">{{ item.status }}</span></td>
-              <td>{{ item.message }}</td>
-            </tr>
-          </tbody>
-        </table>
 
-        <div class="pager">
-          <button class="btn btn-secondary" :disabled="history.page <= 1 || history.loading" @click="goHistoryPage(history.page - 1)">⬅️ 上一页</button>
-          <span>第 {{ history.page }} / {{ totalHistoryPages }} 页，共 {{ history.total }} 条</span>
-          <button class="btn btn-secondary" :disabled="history.page >= totalHistoryPages || history.loading" @click="goHistoryPage(history.page + 1)">下一页 ➡️</button>
+        <div class="panel-footer">
+          <div class="pager fixed">
+            <button class="btn btn-secondary" :disabled="history.page <= 1 || history.loading" @click="goHistoryPage(history.page - 1)">上一页</button>
+            <span>第 {{ history.page }} / {{ totalHistoryPages }} 页，共 {{ history.total }} 条</span>
+            <button class="btn btn-secondary" :disabled="history.page >= totalHistoryPages || history.loading" @click="goHistoryPage(history.page + 1)">下一页</button>
+            <div class="pager-jump">
+              <input v-model="history.jump" class="form-input jump-input" placeholder="跳页" @keyup.enter="jumpHistoryPage" />
+              <button class="btn btn-secondary" :disabled="history.loading" @click="jumpHistoryPage">跳转</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -264,7 +368,7 @@
             <div class="stat-value" style="color: var(--success);">{{ admin.users.filter(u => u.role === 'user').length }}</div>
             <div class="stat-label">已通过</div>
           </div>
-          <div class="stat-card" style="border-color: rgba(99, 102, 241, 0.3);">
+          <div class="stat-card" style="border-color: rgba(var(--accent-rgb), 0.3);">
             <div class="stat-value" style="color: var(--accent-primary);">{{ admin.users.filter(u => u.role === 'admin').length }}</div>
             <div class="stat-label">管理员</div>
           </div>
@@ -314,11 +418,31 @@
         </div>
       </div>
     </div>
+
+    <div v-if="ui.preview.visible" class="modal-mask">
+      <div class="modal-card preview-card">
+        <div class="preview-head">
+          <div>
+            <div class="preview-title">预览：{{ ui.preview.name }}</div>
+            <div class="preview-meta">{{ ui.preview.info }}</div>
+          </div>
+          <button class="btn btn-secondary" @click="closePreview">关闭</button>
+        </div>
+        <div class="preview-body">
+          <div v-if="ui.preview.error" class="task-error">{{ ui.preview.error }}</div>
+          <img v-else-if="ui.preview.type === 'image'" :src="ui.preview.url" class="preview-image" />
+          <iframe v-else-if="ui.preview.type === 'pdf'" :src="ui.preview.url" class="preview-frame"></iframe>
+          <audio v-else-if="ui.preview.type === 'audio'" :src="ui.preview.url" controls class="preview-media"></audio>
+          <video v-else-if="ui.preview.type === 'video'" :src="ui.preview.url" controls class="preview-media"></video>
+          <pre v-else class="preview-text">{{ ui.preview.text }}</pre>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { createSHA256 } from 'hash-wasm'
 
 const CHUNK_SIZE = 8 * 1024 * 1024
@@ -329,14 +453,22 @@ const TOKEN_KEY = 'upload_token'
 
 const activeTab = ref('upload')
 const quotaLoading = ref(false)
-const files = ref([])
+const fileList = ref([])
+const selectedIds = ref(new Set())
+const fileNav = reactive({
+  path: [],
+  page: 1,
+  pageSize: 10,
+  jump: ''
+})
 const tasks = ref([])
 const history = reactive({
   items: [],
   total: 0,
   page: 1,
   pageSize: 10,
-  loading: false
+  loading: false,
+  jump: ''
 })
 const totalHistoryPages = computed(() => Math.max(Math.ceil(history.total / history.pageSize), 1))
 
@@ -358,8 +490,16 @@ const admin = reactive({
 
 const ui = reactive({
   message: { text: '', type: 'info', timer: null, id: 0 },
-  deleteConfirm: { visible: false, fileId: '' }
+  deleteConfirm: { visible: false, fileId: '' },
+  preview: { visible: false, type: 'text', name: '', info: '', url: '', text: '', error: '' }
 })
+
+function makeGroupId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
 
 function makeFileTask(file, relativePath, parent = null) {
   return reactive({
@@ -396,6 +536,7 @@ function makeFolderTask(fileTasks, folderName) {
   return reactive({
     kind: 'folder',
     localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    groupId: makeGroupId(),
     folderName,
     displayName: `${folderName}（${fileTasks.length}个文件）`,
     files: fileTasks,
@@ -432,6 +573,112 @@ function showMessage(text, type = 'info') {
   }, 2800)
 }
 
+function buildFileTree(items) {
+  const root = {
+    name: '',
+    folders: {},
+    files: [],
+    totalSize: 0,
+    totalFiles: 0,
+    updatedAt: ''
+  }
+
+  function touchNode(node, file) {
+    node.totalSize += file.file_size || 0
+    node.totalFiles += 1
+    if (!node.updatedAt || new Date(file.created_at) > new Date(node.updatedAt)) {
+      node.updatedAt = file.created_at
+    }
+  }
+
+  items.forEach((file) => {
+    const parts = String(file.file_name || '').split('/').filter(Boolean)
+    if (parts.length === 0) return
+    let current = root
+    const nodes = [root]
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const part = parts[i]
+      if (!current.folders[part]) {
+        current.folders[part] = {
+          name: part,
+          folders: {},
+          files: [],
+          totalSize: 0,
+          totalFiles: 0,
+          updatedAt: ''
+        }
+      }
+      current = current.folders[part]
+      nodes.push(current)
+    }
+    current.files.push(file)
+    nodes.forEach((node) => touchNode(node, file))
+  })
+
+  return root
+}
+
+function getNode(tree, pathParts) {
+  let current = tree
+  for (const part of pathParts) {
+    if (!current.folders[part]) return tree
+    current = current.folders[part]
+  }
+  return current
+}
+
+const fileTree = computed(() => buildFileTree(fileList.value))
+const currentNode = computed(() => getNode(fileTree.value, fileNav.path))
+const fileItems = computed(() => {
+  const node = currentNode.value
+  const folders = Object.values(node.folders || {}).map((folder) => ({
+    type: 'folder',
+    key: `folder-${fileNav.path.join('/')}/${folder.name}`,
+    name: folder.name,
+    size: folder.totalSize,
+    totalFiles: folder.totalFiles,
+    updatedAt: folder.updatedAt,
+    selected: isFolderSelected(folder.name)
+  }))
+  const files = (node.files || []).map((file) => ({
+    type: 'file',
+    key: `file-${file.file_id}`,
+    file,
+    displayName: String(file.file_name || '').split('/').pop() || file.file_name,
+    size: file.file_size,
+    updatedAt: file.created_at,
+    selected: isSelected(file.file_id)
+  }))
+  folders.sort((a, b) => a.name.localeCompare(b.name))
+  files.sort((a, b) => a.displayName.localeCompare(b.displayName))
+  return [...folders, ...files]
+})
+const pagedFileItems = computed(() => {
+  const start = (fileNav.page - 1) * fileNav.pageSize
+  return fileItems.value.slice(start, start + fileNav.pageSize)
+})
+const totalFilePages = computed(() => Math.max(Math.ceil(fileItems.value.length / fileNav.pageSize), 1))
+const selectedCount = computed(() => selectedIds.value.size)
+const allVisibleSelected = computed(() => {
+  const selectable = pagedFileItems.value
+  if (selectable.length === 0) return false
+  return selectable.every((item) => item.selected)
+})
+
+watch(
+  () => [fileNav.path.join('/'), fileList.value.length],
+  () => {
+    fileNav.page = 1
+  }
+)
+
+watch(
+  () => fileList.value.length,
+  () => {
+    selectedIds.value = new Set()
+  }
+)
+
 function onPickFiles(event) {
   const selected = Array.from(event.target.files || [])
   selected.forEach((file) => tasks.value.unshift(makeFileTask(file, file.name)))
@@ -456,6 +703,135 @@ function onPickFolder(event) {
   })
   tasks.value.unshift(folderTask)
   event.target.value = ''
+}
+
+function openFolder(name) {
+  if (!name) return
+  fileNav.path.push(name)
+  fileNav.page = 1
+}
+
+function goUp() {
+  if (fileNav.path.length === 0) return
+  fileNav.path.pop()
+  fileNav.page = 1
+}
+
+function goRoot() {
+  if (fileNav.path.length === 0) return
+  fileNav.path = []
+  fileNav.page = 1
+}
+
+function goToCrumb(index) {
+  fileNav.path = fileNav.path.slice(0, index + 1)
+  fileNav.page = 1
+}
+
+function goFilePage(page) {
+  fileNav.page = Math.min(Math.max(page, 1), totalFilePages.value)
+}
+
+function jumpFilePage() {
+  const target = Number(fileNav.jump)
+  if (!Number.isFinite(target)) return
+  goFilePage(Math.floor(target))
+  fileNav.jump = ''
+}
+
+function isSelected(fileId) {
+  return selectedIds.value.has(fileId)
+}
+
+function getFolderPrefix(name) {
+  const base = fileNav.path.join('/')
+  return base ? `${base}/${name}` : name
+}
+
+function getFileIdsUnder(prefix) {
+  const target = `${prefix}/`
+  return fileList.value
+    .filter((file) => {
+      const path = String(file.file_name || '')
+      return path === prefix || path.startsWith(target)
+    })
+    .map((file) => file.file_id)
+}
+
+function isFolderSelected(name) {
+  const ids = getFileIdsUnder(getFolderPrefix(name))
+  if (ids.length === 0) return false
+  return ids.every((id) => selectedIds.value.has(id))
+}
+
+function toggleSelection(item) {
+  if (item.type === 'folder') {
+    toggleFolderSelection(item.name)
+  } else {
+    toggleFileSelection(item.file.file_id)
+  }
+}
+
+function toggleFolderSelection(name) {
+  const ids = getFileIdsUnder(getFolderPrefix(name))
+  if (ids.length === 0) return
+  const next = new Set(selectedIds.value)
+  const allSelected = ids.every((id) => next.has(id))
+  ids.forEach((id) => {
+    if (allSelected) next.delete(id)
+    else next.add(id)
+  })
+  selectedIds.value = next
+}
+
+function toggleFileSelection(fileId) {
+  const next = new Set(selectedIds.value)
+  if (next.has(fileId)) next.delete(fileId)
+  else next.add(fileId)
+  selectedIds.value = next
+}
+
+function toggleSelectVisible() {
+  const next = new Set(selectedIds.value)
+  const shouldSelect = !allVisibleSelected.value
+  pagedFileItems.value.forEach((item) => {
+    if (item.type === 'folder') {
+      const ids = getFileIdsUnder(getFolderPrefix(item.name))
+      ids.forEach((id) => {
+        if (shouldSelect) next.add(id)
+        else next.delete(id)
+      })
+    } else {
+      const id = item.file.file_id
+      if (shouldSelect) next.add(id)
+      else next.delete(id)
+    }
+  })
+  selectedIds.value = next
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+async function downloadSelectionZip() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  const res = await apiFetch('/api/files/zip/selected', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_ids: ids })
+  })
+  if (!res.ok) {
+    showMessage(await errorText(res), 'error')
+    return
+  }
+  const blob = await res.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = 'selected-files.zip'
+  link.click()
+  URL.revokeObjectURL(link.href)
 }
 
 function authHeaders(extra = {}) {
@@ -522,15 +898,23 @@ function logout() {
   auth.error = ''
   localStorage.removeItem(TOKEN_KEY)
   tasks.value = []
-  files.value = []
+  fileList.value = []
+  fileNav.path = []
+  fileNav.page = 1
+  selectedIds.value = new Set()
   history.items = []
   history.total = 0
+  history.page = 1
+  history.jump = ''
 }
 
 async function refreshFiles() {
   if (!auth.token) return
   const res = await apiFetch('/api/files')
-  files.value = await res.json()
+  fileList.value = await res.json()
+  if (fileNav.page > totalFilePages.value) {
+    fileNav.page = totalFilePages.value
+  }
 }
 
 async function refreshQuota(showTip = false) {
@@ -577,6 +961,13 @@ async function goHistoryPage(page) {
   await refreshHistory(false)
 }
 
+async function jumpHistoryPage() {
+  const target = Number(history.jump)
+  if (!Number.isFinite(target)) return
+  history.jump = ''
+  await goHistoryPage(Math.floor(target))
+}
+
 function removeTask(localId) {
   tasks.value = tasks.value.filter((t) => t.localId !== localId)
 }
@@ -605,15 +996,22 @@ async function startFileTask(task, options = {}) {
     }
 
     setTaskStep(task, '步骤 2/5：正在初始化上传任务并检查已上传分片')
+    const payload = {
+      file_name: task.relativePath,
+      file_size: task.size,
+      file_hash: task.hash,
+      chunk_size: CHUNK_SIZE
+    }
+    if (task.parent) {
+      payload.group_id = task.parent.groupId
+      payload.group_name = task.parent.folderName
+      payload.group_total_files = task.parent.files.length
+      payload.group_total_size = task.parent.totalBytes
+    }
     const initRes = await apiFetch('/api/uploads/init', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_name: task.relativePath,
-        file_size: task.size,
-        file_hash: task.hash,
-        chunk_size: CHUNK_SIZE
-      })
+      body: JSON.stringify(payload)
     })
     if (!initRes.ok) throw new Error(await errorText(initRes))
     const initData = await initRes.json()
@@ -715,11 +1113,34 @@ function markFileDone(fileTask) {
   updateFolderProgress(folderTask, null)
 }
 
+async function completeFolderHistory(folderTask, status, message) {
+  if (!folderTask?.groupId) return
+  const res = await apiFetch('/api/uploads/group/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      group_id: folderTask.groupId,
+      group_name: folderTask.folderName,
+      group_total_files: folderTask.files.length,
+      group_total_size: folderTask.totalBytes,
+      status,
+      message
+    })
+  })
+  if (!res.ok) {
+    throw new Error(await errorText(res))
+  }
+}
+
 async function startFolderTask(folderTask) {
   if (folderTask.status === 'uploading' || folderTask.status === 'hashing') return
   folderTask.paused = false
   folderTask.error = ''
   folderTask.status = 'uploading'
+
+  if (folderTask.currentIndex >= folderTask.files.length) {
+    folderTask.currentIndex = 0
+  }
 
   for (let i = folderTask.currentIndex; i < folderTask.files.length; i += 1) {
     if (folderTask.paused) {
@@ -737,6 +1158,12 @@ async function startFolderTask(folderTask) {
       folderTask.status = 'error'
       folderTask.error = fileTask.error || '文件上传失败'
       setTaskStep(folderTask, `上传失败：${folderTask.error}`)
+      try {
+        await completeFolderHistory(folderTask, 'error', folderTask.error)
+        await refreshHistory(false)
+      } catch (err) {
+        showMessage(String(err), 'error')
+      }
       return
     }
     if (fileTask.status === 'paused') {
@@ -754,7 +1181,26 @@ async function startFolderTask(folderTask) {
   folderTask.speed = 0
   folderTask.etaSec = 0
   setTaskStep(folderTask, '文件夹上传完成')
+  try {
+    await completeFolderHistory(folderTask, 'success', '文件夹上传完成')
+    await refreshHistory(false)
+  } catch (err) {
+    showMessage(String(err), 'error')
+  }
   showMessage(`${folderTask.displayName} 上传完成`, 'success')
+}
+
+function skipFolderError(folderTask) {
+  if (!folderTask || folderTask.kind !== 'folder') return
+  if (folderTask.currentIndex < folderTask.files.length) {
+    const fileTask = folderTask.files[folderTask.currentIndex]
+    fileTask.status = 'error'
+    fileTask.error = fileTask.error || '已跳过'
+  }
+  folderTask.error = ''
+  folderTask.status = 'uploading'
+  folderTask.currentIndex += 1
+  startFolderTask(folderTask)
 }
 
 async function runUpload(task, options = {}) {
@@ -918,6 +1364,62 @@ async function downloadFile(file) {
   showMessage('下载已开始', 'success')
 }
 
+function getFileExtension(name) {
+  const idx = String(name || '').lastIndexOf('.')
+  if (idx < 0) return ''
+  return name.slice(idx + 1).toLowerCase()
+}
+
+function getPreviewType(file) {
+  const ext = getFileExtension(file.file_name)
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
+  if (['pdf'].includes(ext)) return 'pdf'
+  if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audio'
+  if (['mp4', 'webm', 'ogg'].includes(ext)) return 'video'
+  if (['txt', 'md', 'log', 'json', 'csv', 'xml', 'yml', 'yaml', 'py', 'js', 'ts', 'html', 'css', 'vue'].includes(ext)) {
+    return 'text'
+  }
+  return 'text'
+}
+
+async function previewFile(file) {
+  const type = getPreviewType(file)
+  const maxBytes = type === 'text' ? 2 * 1024 * 1024 : 20 * 1024 * 1024
+  ui.preview = {
+    visible: true,
+    type,
+    name: file.file_name,
+    info: `${formatBytes(file.file_size)} · ${type.toUpperCase()}`,
+    url: '',
+    text: '',
+    error: ''
+  }
+
+  if (file.file_size > maxBytes) {
+    ui.preview.error = '文件过大，建议下载查看'
+    return
+  }
+
+  const res = await apiFetch(`/api/files/${file.file_id}/download`)
+  if (!res.ok) {
+    ui.preview.error = await errorText(res)
+    return
+  }
+  if (type === 'text') {
+    ui.preview.text = await res.text()
+    return
+  }
+  const blob = await res.blob()
+  ui.preview.url = URL.createObjectURL(blob)
+}
+
+function closePreview() {
+  if (ui.preview.url) {
+    URL.revokeObjectURL(ui.preview.url)
+  }
+  ui.preview = { visible: false, type: 'text', name: '', info: '', url: '', text: '', error: '' }
+}
+
 function showCopyCommands(file) {
   const baseUrl = window.location.origin
   const downloadUrl = `${baseUrl}/api/public/download/${file.file_id}?token=${auth.token}`
@@ -1032,6 +1534,7 @@ async function confirmDelete() {
   const res = await apiFetch(`/api/files/${fileId}`, { method: 'DELETE' })
   if (res.ok) {
     await Promise.all([refreshFiles(), refreshQuota(false)])
+    clearSelection()
     showMessage('文件已删除', 'success')
   } else {
     showMessage(await errorText(res), 'error')

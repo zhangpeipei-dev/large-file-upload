@@ -49,6 +49,10 @@ class Database:
                     total_chunks INTEGER NOT NULL,
                     uploaded_chunks TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    group_id TEXT,
+                    group_name TEXT,
+                    group_total_files INTEGER,
+                    group_total_size INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -77,6 +81,8 @@ class Database:
                     file_hash TEXT NOT NULL,
                     status TEXT NOT NULL,
                     message TEXT NOT NULL,
+                    group_id TEXT,
+                    is_group INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
                 """
@@ -87,6 +93,14 @@ class Database:
             )
             self._ensure_column(conn, "files", "user_id", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "users", "role", "TEXT NOT NULL DEFAULT 'user'")
+            self._ensure_column(conn, "upload_tasks", "group_id", "TEXT")
+            self._ensure_column(conn, "upload_tasks", "group_name", "TEXT")
+            self._ensure_column(conn, "upload_tasks", "group_total_files", "INTEGER")
+            self._ensure_column(conn, "upload_tasks", "group_total_size", "INTEGER")
+            self._ensure_column(conn, "upload_history", "group_id", "TEXT")
+            self._ensure_column(
+                conn, "upload_history", "is_group", "INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str):
@@ -157,8 +171,9 @@ class Database:
                 """
                 INSERT INTO upload_tasks (
                     upload_id, user_id, file_name, file_size, file_hash, chunk_size,
-                    total_chunks, uploaded_chunks, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    total_chunks, uploaded_chunks, status, group_id, group_name,
+                    group_total_files, group_total_size, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(upload_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     file_name=excluded.file_name,
@@ -168,6 +183,10 @@ class Database:
                     total_chunks=excluded.total_chunks,
                     uploaded_chunks=excluded.uploaded_chunks,
                     status=excluded.status,
+                    group_id=excluded.group_id,
+                    group_name=excluded.group_name,
+                    group_total_files=excluded.group_total_files,
+                    group_total_size=excluded.group_total_size,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -180,6 +199,10 @@ class Database:
                     row["total_chunks"],
                     json.dumps(row["uploaded_chunks"]),
                     row["status"],
+                    row.get("group_id"),
+                    row.get("group_name"),
+                    row.get("group_total_files"),
+                    row.get("group_total_size"),
                     row["created_at"],
                     row["updated_at"],
                 ),
@@ -338,8 +361,9 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO upload_history (
-                    record_id, user_id, file_name, file_size, file_hash, status, message, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    record_id, user_id, file_name, file_size, file_hash, status, message,
+                    group_id, is_group, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["record_id"],
@@ -349,6 +373,8 @@ class Database:
                     row["file_hash"],
                     row["status"],
                     row["message"],
+                    row.get("group_id"),
+                    int(row.get("is_group") or 0),
                     row["created_at"],
                 ),
             )
@@ -373,6 +399,39 @@ class Database:
                 (user_id, page_size, offset),
             ).fetchall()
             return {"items": [dict(row) for row in rows], "total": total}
+
+    def get_history_by_group_id(
+        self, user_id: str, group_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT * FROM upload_history
+                WHERE user_id = ? AND group_id = ? LIMIT 1
+                """,
+                (user_id, group_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def update_history_by_group_id(
+        self,
+        user_id: str,
+        group_id: str,
+        status: str,
+        message: str,
+        file_size: int,
+        created_at: str,
+    ):
+        with self.conn() as conn:
+            conn.execute(
+                """
+                UPDATE upload_history
+                SET status = ?, message = ?, file_size = ?, created_at = ?
+                WHERE user_id = ? AND group_id = ?
+                """,
+                (status, message, file_size, created_at, user_id, group_id),
+            )
 
     @staticmethod
     def _row_to_upload_task(row: sqlite3.Row) -> Dict[str, Any]:
