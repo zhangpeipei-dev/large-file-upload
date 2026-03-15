@@ -20,9 +20,20 @@ def utc_now() -> str:
 
 
 def sanitize_filename(name: str) -> str:
-    # Prevent path traversal and keep names filesystem-safe.
-    base = os.path.basename(name).strip()
-    return base or f"unnamed-{uuid4().hex[:8]}"
+    # Prevent path traversal while keeping relative folder structure for UI.
+    if not name:
+        return f"unnamed-{uuid4().hex[:8]}"
+
+    normalized = name.replace("\\", "/").strip()
+    parts = []
+    for part in normalized.split("/"):
+        part = part.strip()
+        if not part or part in (".", ".."):
+            continue
+        parts.append(part.replace(":", "_"))
+
+    cleaned = "/".join(parts)
+    return cleaned or f"unnamed-{uuid4().hex[:8]}"
 
 
 def get_upload_dir(upload_id: str) -> Path:

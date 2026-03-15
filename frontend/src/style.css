@@ -369,6 +369,12 @@ body {
 }
 
 /* Pick File Button */
+.pick-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .pick-btn {
   padding: 12px 24px;
   background: var(--accent-gradient);

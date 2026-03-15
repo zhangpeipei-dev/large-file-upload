@@ -134,7 +134,7 @@ def api_download_file(file_id: str, user: dict = Depends(get_current_user)):
     record = get_file(user=user, file_id=file_id)
     return FileResponse(
         record["file_path"],
-        filename=record["file_name"],
+        filename=Path(record["file_name"]).name,
         media_type="application/octet-stream",
     )
 
@@ -159,7 +159,7 @@ def api_public_download(file_id: str, token: str = Query(...)):
     record = get_file(user=user, file_id=file_id)
     return FileResponse(
         record["file_path"],
-        filename=record["file_name"],
+        filename=Path(record["file_name"]).name,
         media_type="application/octet-stream",
     )
 

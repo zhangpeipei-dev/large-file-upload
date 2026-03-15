@@ -64,12 +64,18 @@
       <section v-show="activeTab === 'upload'" class="panel">
         <div class="panel-head">
           <h2 class="panel-title">上传中心</h2>
-          <label class="pick-btn">
-            <span>➕ 选择文件</span>
-            <input type="file" multiple @change="onPickFiles" />
-          </label>
+          <div class="pick-group">
+            <label class="pick-btn">
+              <span>➕ 选择文件</span>
+              <input type="file" multiple @change="onPickFiles" />
+            </label>
+            <label class="pick-btn">
+              <span>📂 选择文件夹</span>
+              <input type="file" multiple webkitdirectory @change="onPickFolder" />
+            </label>
+          </div>
         </div>
-        <p class="tip">支持大文件分片上传、断点续传、多线程并发，智能哈希校验确保文件完整性</p>
+        <p class="tip">支持大文件分片上传、断点续传、多线程并发，智能哈希校验确保文件完整性。支持选择文件夹并保留相对路径。</p>
 
         <div v-if="tasks.length === 0" class="empty">
           <div class="empty-icon">📭</div>
@@ -79,7 +85,7 @@
         <div v-for="task in tasks" :key="task.localId" class="task-card">
           <div class="task-header">
             <div class="task-info">
-              <strong>{{ task.name }}</strong>
+              <strong>{{ task.displayName }}</strong>
               <span>{{ formatBytes(task.size) }}</span>
             </div>
             <span :class="['status', task.status]">{{ statusText(task.status) }}</span>
@@ -91,7 +97,8 @@
 
           <div class="meta-grid">
             <span>📊 进度：{{ task.progress.toFixed(1) }}%</span>
-            <span>📦 分片：{{ task.uploadedCount }} / {{ task.totalChunks || '-' }}</span>
+            <span v-if="task.kind === 'folder'">📁 文件：{{ task.uploadedFiles }} / {{ task.files.length }}</span>
+            <span v-else>📦 分片：{{ task.uploadedCount }} / {{ task.totalChunks || '-' }}</span>
             <span>⚡ 速度：{{ formatBytes(task.speed) }}/s</span>
             <span>⏱️ 剩余：{{ formatTime(task.etaSec) }}</span>
           </div>
@@ -354,11 +361,16 @@ const ui = reactive({
   deleteConfirm: { visible: false, fileId: '' }
 })
 
-function makeTask(file) {
+function makeFileTask(file, relativePath, parent = null) {
   return reactive({
+    kind: 'file',
     localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    parent,
     file,
     name: file.name,
+    baseName: file.name,
+    relativePath: relativePath || file.name,
+    displayName: relativePath || file.name,
     size: file.size,
     hash: '',
     uploadId: '',
@@ -376,6 +388,29 @@ function makeTask(file) {
     controllers: new Map(),
     lastUploadedBytes: 0,
     mergeTriggered: false
+  })
+}
+
+function makeFolderTask(fileTasks, folderName) {
+  const totalBytes = fileTasks.reduce((sum, item) => sum + (item.size || 0), 0)
+  return reactive({
+    kind: 'folder',
+    localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    folderName,
+    displayName: `${folderName}（${fileTasks.length}个文件）`,
+    files: fileTasks,
+    totalBytes,
+    completedBytes: 0,
+    uploadedFiles: 0,
+    currentIndex: 0,
+    progress: 0,
+    status: 'pending',
+    error: '',
+    paused: false,
+    speed: 0,
+    etaSec: 0,
+    stepMessage: '等待开始',
+    logs: []
   })
 }
 
@@ -399,7 +434,27 @@ function showMessage(text, type = 'info') {
 
 function onPickFiles(event) {
   const selected = Array.from(event.target.files || [])
-  selected.forEach((file) => tasks.value.unshift(makeTask(file)))
+  selected.forEach((file) => tasks.value.unshift(makeFileTask(file, file.name)))
+  event.target.value = ''
+}
+
+function onPickFolder(event) {
+  const selected = Array.from(event.target.files || [])
+  if (selected.length === 0) {
+    event.target.value = ''
+    return
+  }
+  const firstPath = selected[0].webkitRelativePath || selected[0].name
+  const folderName = firstPath.split('/')[0] || 'folder'
+  const fileTasks = selected.map((file) => {
+    const relativePath = file.webkitRelativePath || file.name
+    return makeFileTask(file, relativePath)
+  })
+  const folderTask = makeFolderTask(fileTasks, folderName)
+  fileTasks.forEach((fileTask) => {
+    fileTask.parent = folderTask
+  })
+  tasks.value.unshift(folderTask)
   event.target.value = ''
 }
 
@@ -527,9 +582,19 @@ function removeTask(localId) {
 }
 
 async function startTask(task) {
+  if (task.kind === 'folder') {
+    await startFolderTask(task)
+    return
+  }
+  await startFileTask(task)
+}
+
+async function startFileTask(task, options = {}) {
   if (task.status === 'uploading' || task.status === 'hashing') return
   task.paused = false
   task.error = ''
+
+  const notify = options.notify !== false
 
   try {
     if (!task.hash) {
@@ -544,7 +609,7 @@ async function startTask(task) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        file_name: task.name,
+        file_name: task.relativePath,
         file_size: task.size,
         file_hash: task.hash,
         chunk_size: CHUNK_SIZE
@@ -563,13 +628,13 @@ async function startTask(task) {
       task.progress = 100
       setTaskStep(task, '文件已存在，秒传完成')
       await Promise.all([refreshFiles(), refreshQuota(false), refreshHistory(false)])
-      showMessage(`${task.name} 秒传完成`, 'success')
+      if (notify) showMessage(`${task.displayName} 秒传完成`, 'success')
       return
     }
 
     task.uploadId = initData.upload_id
     setTaskStep(task, '步骤 3/5：开始分片并发上传')
-    await runUpload(task)
+    await runUpload(task, { notify })
   } catch (err) {
     task.status = task.paused ? 'paused' : 'error'
     task.error = String(err)
@@ -578,6 +643,14 @@ async function startTask(task) {
 }
 
 function pauseTask(task) {
+  if (task.kind === 'folder') {
+    task.paused = true
+    const current = task.files[task.currentIndex]
+    if (current) pauseTask(current)
+    task.status = 'paused'
+    setTaskStep(task, '上传已暂停')
+    return
+  }
   task.paused = true
   for (const controller of task.controllers.values()) {
     controller.abort()
@@ -588,16 +661,23 @@ function pauseTask(task) {
 }
 
 async function resumeTask(task) {
+  if (task.kind === 'folder') {
+    task.paused = false
+    task.error = ''
+    await startFolderTask(task)
+    return
+  }
+
   task.paused = false
   task.error = ''
   if (!task.uploadId) {
-    await startTask(task)
+    await startFileTask(task)
     return
   }
 
   const res = await apiFetch(`/api/uploads/${task.uploadId}`)
   if (!res.ok) {
-    await startTask(task)
+    await startFileTask(task)
     return
   }
 
@@ -610,7 +690,74 @@ async function resumeTask(task) {
   await runUpload(task)
 }
 
-async function runUpload(task) {
+function updateFolderProgress(folderTask, currentFileTask) {
+  const totalBytes = folderTask.totalBytes || 0
+  if (totalBytes <= 0) {
+    folderTask.progress = 0
+    return
+  }
+  let currentBytes = 0
+  if (currentFileTask) {
+    const uploadedBytes = currentFileTask.uploadedCount * CHUNK_SIZE
+    currentBytes = Math.min(uploadedBytes, currentFileTask.size)
+    folderTask.speed = currentFileTask.speed || 0
+    folderTask.etaSec = currentFileTask.etaSec || 0
+  }
+  const progress = ((folderTask.completedBytes + currentBytes) / totalBytes) * 100
+  folderTask.progress = Math.min(100, Math.max(0, progress))
+}
+
+function markFileDone(fileTask) {
+  if (!fileTask.parent) return
+  const folderTask = fileTask.parent
+  folderTask.completedBytes += fileTask.size || 0
+  folderTask.uploadedFiles = Math.min(folderTask.uploadedFiles + 1, folderTask.files.length)
+  updateFolderProgress(folderTask, null)
+}
+
+async function startFolderTask(folderTask) {
+  if (folderTask.status === 'uploading' || folderTask.status === 'hashing') return
+  folderTask.paused = false
+  folderTask.error = ''
+  folderTask.status = 'uploading'
+
+  for (let i = folderTask.currentIndex; i < folderTask.files.length; i += 1) {
+    if (folderTask.paused) {
+      folderTask.status = 'paused'
+      setTaskStep(folderTask, '上传已暂停')
+      return
+    }
+
+    const fileTask = folderTask.files[i]
+    folderTask.currentIndex = i
+    setTaskStep(folderTask, `正在上传：${fileTask.displayName}（${i + 1}/${folderTask.files.length}）`)
+
+    await startFileTask(fileTask, { notify: false })
+    if (fileTask.status === 'error') {
+      folderTask.status = 'error'
+      folderTask.error = fileTask.error || '文件上传失败'
+      setTaskStep(folderTask, `上传失败：${folderTask.error}`)
+      return
+    }
+    if (fileTask.status === 'paused') {
+      folderTask.status = 'paused'
+      return
+    }
+    if (fileTask.status === 'done') {
+      markFileDone(fileTask)
+      folderTask.currentIndex = i + 1
+    }
+  }
+
+  folderTask.status = 'done'
+  folderTask.progress = 100
+  folderTask.speed = 0
+  folderTask.etaSec = 0
+  setTaskStep(folderTask, '文件夹上传完成')
+  showMessage(`${folderTask.displayName} 上传完成`, 'success')
+}
+
+async function runUpload(task, options = {}) {
   task.status = 'uploading'
   task.mergeTriggered = false
   setTaskStep(task, '步骤 3/5：正在上传分片（支持失败重试）')
@@ -623,6 +770,8 @@ async function runUpload(task) {
 
     const remainChunks = Math.max(task.totalChunks - task.uploadedCount, 0)
     task.etaSec = task.speed > 0 ? Math.ceil((remainChunks * CHUNK_SIZE) / task.speed) : 0
+
+    if (task.parent) updateFolderProgress(task.parent, task)
   }, 1000)
 
   try {
@@ -643,6 +792,7 @@ async function runUpload(task) {
         task.uploadedSet.add(chunkIndex)
         task.uploadedCount = task.uploadedSet.size
         task.progress = (task.uploadedCount / Math.max(task.totalChunks, 1)) * 100
+        if (task.parent) updateFolderProgress(task.parent, task)
       }
     }
 
@@ -656,7 +806,7 @@ async function runUpload(task) {
     if (task.uploadedCount === task.totalChunks && !task.mergeTriggered) {
       task.mergeTriggered = true
       setTaskStep(task, '步骤 4/5：分片上传完成，准备服务端合并')
-      await mergeTask(task)
+      await mergeTask(task, options)
     }
   } finally {
     clearInterval(timer)
@@ -664,6 +814,7 @@ async function runUpload(task) {
     task.speed = 0
     task.etaSec = 0
     task.lastUploadedBytes = 0
+    if (task.parent) updateFolderProgress(task.parent, task)
   }
 }
 
@@ -688,7 +839,7 @@ async function uploadChunk(task, chunkIndex) {
   const formData = new FormData()
   formData.append('upload_id', task.uploadId)
   formData.append('chunk_index', String(chunkIndex))
-  formData.append('chunk', blob, `${task.name}.part${chunkIndex}`)
+  formData.append('chunk', blob, `${task.baseName}.part${chunkIndex}`)
 
   const controller = new AbortController()
   task.controllers.set(chunkIndex, controller)
@@ -710,7 +861,8 @@ async function uploadChunk(task, chunkIndex) {
   }
 }
 
-async function mergeTask(task) {
+async function mergeTask(task, options = {}) {
+  const notify = options.notify !== false
   for (let round = 0; round < MERGE_REPAIR_MAX_ROUNDS; round += 1) {
     setTaskStep(task, `步骤 5/5：服务端合并校验中（第 ${round + 1} 次）`)
     const res = await apiFetch('/api/uploads/merge', {
@@ -724,7 +876,7 @@ async function mergeTask(task) {
       task.progress = 100
       setTaskStep(task, '上传完成，文件已落盘并通过校验')
       await Promise.all([refreshFiles(), refreshQuota(false), refreshHistory(false)])
-      showMessage(`${task.name} 上传完成`, 'success')
+      if (notify) showMessage(`${task.displayName} 上传完成`, 'success')
       return
     }
 
